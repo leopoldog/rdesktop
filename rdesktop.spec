@@ -1,12 +1,12 @@
 Summary: Remote Desktop Protocol client
 Name: rdesktop
-Version: 1.8.3post
+Version: 1.8.3post-cache
 Release: 1
 License: GPL; see COPYING
 Group: Applications/Communications
 Source: rdesktop-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-buildroot
-Packager: Peter Åstrand <astrand@cendio.se>
+Packager: Leopoldo Ghielmetti <leopoldo.ghielmetti@a3.epfl.ch>
 
 %description
 rdesktop is a client for Remote Desktop Protocol (RDP), used in a number of

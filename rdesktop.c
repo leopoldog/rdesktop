@@ -1324,6 +1324,7 @@ main(int argc, char *argv[])
 		lspci_init();
 
 	rdpdr_init();
+	atexit(pstcache_exit);
 
 	dvc_init();
 	rdpedisp_init();
@@ -2040,18 +2041,39 @@ rd_pstcache_mkdir(void)
 	return True;
 }
 
-/* open a file in the .rdesktop directory */
 int
-rd_open_file(char *filename)
+rd_get_full_path(char *filename, char *full_path)
 {
 	char *home;
-	char fn[256];
-	int fd;
 
 	home = getenv("HOME");
 	if (home == NULL)
 		return -1;
-	sprintf(fn, "%s/.rdesktop/%s", home, filename);
+
+	sprintf(full_path, "%s/.rdesktop/%s", home, filename);
+
+	return 0;
+}
+
+void
+rd_unlink_file(char *filename)
+{
+	char fn[256];
+
+	if (rd_get_full_path(filename, fn) == -1)
+		return -1;
+	unlink(fn);
+}
+
+/* open a file in the .rdesktop directory */
+int
+rd_open_file(char *filename)
+{
+	char fn[256];
+	int fd;
+
+	if (rd_get_full_path(filename, fn) == -1)
+		return -1;
 	fd = open(fn, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1)
 		logger(Core, Error, "rd_open_file(), open() failed: %s", strerror(errno));

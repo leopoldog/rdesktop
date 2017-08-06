@@ -42,6 +42,8 @@ AC_CHECK_HEADER(sysexits.h, AC_DEFINE(HAVE_SYSEXITS_H))
 
 AC_CHECK_TOOL(STRIP, strip, :)
 
+m4_include(/usr/share/aclocal/pkg.m4)
+
 dnl Don't depend on pkg-config
 m4_ifdef([PKG_CHECK_MODULES], [], [
 		m4_errprint([warning: pkg-config checks are not available])

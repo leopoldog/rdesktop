@@ -117,6 +117,7 @@ RD_BOOL pstcache_load_bitmap(uint8 cache_id, uint16 cache_idx);
 RD_BOOL pstcache_save_bitmap(uint8 cache_id, uint16 cache_idx, uint8 * key, uint8 width,
 			     uint8 height, uint16 length, uint8 * data);
 int pstcache_enumerate(uint8 id, HASH_KEY * keylist);
+void pstcache_exit(void);
 RD_BOOL pstcache_init(uint8 cache_id);
 /* rdesktop.c */
 int main(int argc, char *argv[]);
@@ -144,6 +145,7 @@ int rd_read_file(int fd, void *ptr, int len);
 int rd_write_file(int fd, void *ptr, int len);
 int rd_lseek_file(int fd, int offset);
 RD_BOOL rd_lock_file(int fd, int start, int len);
+void rd_unlink_file(char *filename);
 /* rdp5.c */
 void process_ts_fp_updates(STREAM s);
 /* rdp.c */

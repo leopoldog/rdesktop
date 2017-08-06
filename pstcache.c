@@ -19,6 +19,9 @@
 
 #include "rdesktop.h"
 
+#include <unistd.h>     /* getpid */
+#include <stdint.h>     /* intmax_t */
+
 #define MAX_CELL_SIZE		0x1000	/* pixels */
 
 #define IS_PERSISTENT(id) (id < 8 && g_pstcache_fd[id] > 0)
@@ -29,6 +32,7 @@ extern RD_BOOL g_bitmap_cache_persist_enable;
 extern RD_BOOL g_bitmap_cache_precache;
 
 int g_pstcache_fd[8];
+char g_pstcache_fn[8][256];   /* Keep filenames global for cleaning */
 int g_pstcache_Bpp;
 RD_BOOL g_pstcache_enumerated = False;
 uint8 zero_key[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -159,12 +163,30 @@ pstcache_enumerate(uint8 id, HASH_KEY * keylist)
 	return idx;
 }
 
+/* Clean up the persistent bitmap cache files */
+void
+pstcache_exit(void)
+{
+	int id;
+
+	for (id = 0; id < 8; ++id)
+	{
+		if (g_pstcache_fd[id])
+		{
+			logger(Core, Debug, "Closing file %d, unlinking file %s\n", id, g_pstcache_fn[id]);
+			rd_close_file(g_pstcache_fd[id]);
+			rd_unlink_file(g_pstcache_fn[id]);
+		}
+	}
+}
+
 /* initialise the persistent bitmap cache */
 RD_BOOL
 pstcache_init(uint8 cache_id)
 {
 	int fd;
-	char filename[256];
+	char *filename;
+	intmax_t pid;
 
 	if (g_pstcache_enumerated)
 		return True;
@@ -182,7 +204,11 @@ pstcache_init(uint8 cache_id)
 	}
 
 	g_pstcache_Bpp = (g_server_depth + 7) / 8;
-	sprintf(filename, "cache/pstcache_%d_%d", cache_id, g_pstcache_Bpp);
+	/* cast pid_t (a signed integer of some kind) to intmax_t - for sprintf */
+	pid = (intmax_t) getpid();
+	/* filename pointer points to global array - for clean up */
+	filename = g_pstcache_fn[cache_id];
+	sprintf(filename, "cache/pstcache_%d_%d_%jd", cache_id, g_pstcache_Bpp, pid);
 	logger(Core, Debug, "pstcache_init(), bitmap cache file %s", filename);
 
 	fd = rd_open_file(filename);
