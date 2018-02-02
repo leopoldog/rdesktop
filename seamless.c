@@ -56,6 +56,7 @@ seamless_get_token(char **s)
 static RD_BOOL
 seamless_process_line(const char *line, void *data)
 {
+	UNUSED(data);
 	char *p, *l;
 	char *tok1, *tok3, *tok4, *tok5, *tok6, *tok7, *tok8;
 	unsigned long id, flags;
@@ -358,7 +359,7 @@ seamless_line_handler(const char *line, void *data)
 {
 	if (!seamless_process_line(line, data))
 	{
-		logger(Core, Warning, "seamless_line_handler(), invlid request '%s'", line);
+		logger(Core, Warning, "seamless_line_handler(), invalid request '%s'", line);
 	}
 	return True;
 }

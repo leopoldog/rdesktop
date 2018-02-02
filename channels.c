@@ -69,6 +69,7 @@ channel_register(char *name, uint32 flags, void (*callback) (STREAM))
 STREAM
 channel_init(VCHANNEL * channel, uint32 length)
 {
+	UNUSED(channel);
 	STREAM s;
 
 	s = sec_init(g_encryption ? SEC_ENCRYPT : 0, length + 8);
@@ -91,7 +92,7 @@ channel_send(STREAM s, VCHANNEL * channel)
 	s_pop_layer(s, channel_hdr);
 	length = s->end - s->p - 8;
 
-	logger(Protocol, Debug, "channel_send(), length = %d", length);
+	logger(Protocol, Debug, "channel_send(), channel = %d, length = %d", channel->mcs_id, length);
 
 	thislength = MIN(length, CHANNEL_CHUNK_LENGTH);
 /* Note: In the original clipboard implementation, this number was

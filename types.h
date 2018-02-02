@@ -19,6 +19,12 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#ifndef _TYPES_H
+#define _TYPES_H
+
+#include "constants.h"
+#include "stream.h"
+
 typedef int RD_BOOL;
 
 #ifndef True
@@ -301,3 +307,12 @@ typedef struct fileinfo
 FILEINFO;
 
 typedef RD_BOOL(*str_handle_lines_t) (const char *line, void *data);
+
+typedef enum {
+	Fixed,
+	PercentageOfScreen,
+	Workarea,
+	Fullscreen,
+} window_size_type_t;
+
+#endif /* _TYPES_H */

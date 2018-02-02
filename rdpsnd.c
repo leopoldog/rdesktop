@@ -3,6 +3,7 @@
    Sound Channel Process Functions
    Copyright 2006-2010 Pierre Ossman <ossman@cendio.se> for Cendio AB
    Copyright 2009-2011 Peter Astrand <astrand@cendio.se> for Cendio AB
+   Copyright 2017 Henrik Andersson <hean01@cendio.se> for Cendio AB
    Copyright (C) Matthew Chapman <matthewc.unsw.edu.au> 2003-2008
    Copyright (C) GuoJunBo <guojunbo@ict.ac.cn> 2003
    Copyright 2017 Karl Mikaelsson <derfian@cendio.se> for Cendio AB
@@ -110,6 +111,8 @@ rdpsnd_send_waveconfirm(uint16 tick, uint8 packet_index)
 void
 rdpsnd_record(const void *data, unsigned int size)
 {
+	UNUSED(data);
+	UNUSED(size);
 	/* TODO: Send audio over RDP */
 }
 
@@ -222,7 +225,7 @@ rdpsnd_process_negotiate(STREAM in)
 	uint32 flags = TSSNDCAPS_VOLUME;
 
 	/* if sound is enabled, set snd caps to alive to enable
-	   transmision of audio from server */
+	   transmission of audio from server */
 	if (g_rdpsnd)
 	{
 		flags |= TSSNDCAPS_ALIVE;
@@ -430,6 +433,7 @@ rdpsnd_process(STREAM s)
 static RD_BOOL
 rdpsnddbg_line_handler(const char *line, void *data)
 {
+	UNUSED(data);
 	logger(Sound, Debug, "rdpsnddbg_line_handler(), \"%s\"", line);
 	return True;
 }
@@ -459,6 +463,11 @@ rdpsnd_register_drivers(char *options)
 	/* The order of registrations define the probe-order
 	   when opening the device for the first time */
 	reg = &drivers;
+#if defined(RDPSND_PULSE)
+	*reg = pulse_register(options);
+	assert(*reg);
+	reg = &((*reg)->next);
+#endif
 #if defined(RDPSND_ALSA)
 	*reg = alsa_register(options);
 	assert(*reg);

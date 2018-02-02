@@ -3,7 +3,7 @@
    Protocol services - RDP encryption and licensing
    Copyright (C) Matthew Chapman <matthewc.unsw.edu.au> 1999-2008
    Copyright 2005-2011 Peter Astrand <astrand@cendio.se> for Cendio AB
-   Copyright 2017 Henrik Andersson <hean01@cendio.se> for Cendio AB
+   Copyright 2017-2018 Henrik Andersson <hean01@cendio.se> for Cendio AB
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -23,8 +23,9 @@
 #include "ssl.h"
 
 extern char g_hostname[16];
-extern int g_width;
-extern int g_height;
+extern uint32 g_requested_session_width;
+extern uint32 g_requested_session_height;
+extern int g_dpi;
 extern unsigned int g_keylayout;
 extern int g_keyboard_type;
 extern int g_keyboard_subtype;
@@ -391,11 +392,14 @@ sec_establish_key(void)
 static void
 sec_out_mcs_connect_initial_pdu(STREAM s, uint32 selected_protocol)
 {
-	int length = 162 + 76 + 12 + 4;
+	int length = 162 + 76 + 12 + 4 + (g_dpi > 0 ? 18 : 0);
 	unsigned int i;
 	uint32 rdpversion = RDP_40;
 	uint16 capflags = RNS_UD_CS_SUPPORT_ERRINFO_PDU;
-	uint16 colorsupport = RNS_UD_24BPP_SUPPORT | RNS_UD_16BPP_SUPPORT;
+	uint16 colorsupport = RNS_UD_24BPP_SUPPORT | RNS_UD_16BPP_SUPPORT | RNS_UD_32BPP_SUPPORT;
+	uint32 physwidth, physheight, desktopscale, devicescale;
+
+	logger(Protocol, Debug, "%s()", __func__);
 
 	if (g_rdp_version >= RDP_V5)
 		rdpversion = RDP_50;
@@ -422,10 +426,10 @@ sec_out_mcs_connect_initial_pdu(STREAM s, uint32 selected_protocol)
 
 	/* Client information (TS_UD_CS_CORE) */
 	out_uint16_le(s, CS_CORE);		/* type */
-	out_uint16_le(s, 216);			/* length */
+	out_uint16_le(s, 216 + (g_dpi > 0 ? 18 : 0));	/* length */
 	out_uint32_le(s, rdpversion);           /* version */
-	out_uint16_le(s, g_width);		/* desktopWidth */
-	out_uint16_le(s, g_height);		/* desktopHeight */
+	out_uint16_le(s, g_requested_session_width);		/* desktopWidth */
+	out_uint16_le(s, g_requested_session_height);		/* desktopHeight */
 	out_uint16_le(s, RNS_UD_COLOR_8BPP);	/* colorDepth */
 	out_uint16_le(s, RNS_UD_SAS_DEL);	/* SASSequence */
 	out_uint32_le(s, g_keylayout);		/* keyboardLayout */
@@ -441,13 +445,31 @@ sec_out_mcs_connect_initial_pdu(STREAM s, uint32 selected_protocol)
 	out_uint16_le(s, RNS_UD_COLOR_8BPP);	/* postBeta2ColorDepth (overrides colorDepth) */
 	out_uint16_le(s, 1);			/* clientProductId (should be 1) */
 	out_uint32_le(s, 0);			/* serialNumber (should be 0) */
-	out_uint16_le(s, g_server_depth);	/* highColorDepth (overrides postBeta2ColorDepth) */
+
+	/* highColorDepth (overrides postBeta2ColorDepth). Capped at 24BPP.
+	   To get 32BPP sessions, we need to set a capability flag. */
+	out_uint16_le(s, MIN(g_server_depth, 24));
+	if (g_server_depth == 32)
+		capflags |= RNS_UD_CS_WANT_32BPP_SESSION;
+
 	out_uint16_le(s, colorsupport);		/* supportedColorDepths */
 	out_uint16_le(s, capflags);		/* earlyCapabilityFlags */
 	out_uint8s(s, 64);			/* clientDigProductId */
 	out_uint8(s, 0);			/* connectionType */
 	out_uint8(s, 0);			/* pad */
 	out_uint32_le(s, selected_protocol);	/* serverSelectedProtocol */
+	if (g_dpi > 0)
+	{
+		/* Extended client info describing monitor geometry */
+		utils_calculate_dpi_scale_factors(g_requested_session_width, g_requested_session_height, g_dpi,
+						  &physwidth, &physheight,
+						  &desktopscale, &devicescale);
+		out_uint32_le(s, physwidth);	/* physicalwidth */
+		out_uint32_le(s, physheight);	/* physicalheight */
+		out_uint16_le(s, ORIENTATION_LANDSCAPE);	/* Orientation */
+		out_uint32_le(s, desktopscale);	/* DesktopScaleFactor */
+		out_uint32_le(s, devicescale);	/* DeviceScaleFactor */
+	}
 
 	/* Write a Client Cluster Data (TS_UD_CS_CLUSTER) */
 	uint32 cluster_flags = 0;
@@ -550,6 +572,8 @@ sec_parse_crypt_info(STREAM s, uint32 * rc4_key_size,
 	RDSSL_RKEY *server_public_key;
 	uint16 tag, length;
 	uint8 *next_tag, *end;
+
+	logger(Protocol, Debug, "%s()", __func__);
 
 	in_uint32_le(s, *rc4_key_size);	/* 1 = 40-bit, 2 = 128-bit */
 	in_uint32_le(s, crypt_level);	/* 1 = low, 2 = medium, 3 = high */
@@ -735,6 +759,8 @@ sec_process_crypt_info(STREAM s)
 	uint8 exponent[SEC_EXPONENT_SIZE];
 	uint32 rc4_key_size;
 
+	logger(Protocol, Debug, "%s()", __func__);
+
 	memset(modulus, 0, sizeof(modulus));
 	memset(exponent, 0, sizeof(exponent));
 	if (!sec_parse_crypt_info(s, &rc4_key_size, &server_random, modulus, exponent))
@@ -775,6 +801,7 @@ sec_process_mcs_data(STREAM s)
 	in_uint8(s, len);
 	if (len & 0x80)
 		in_uint8(s, len);
+	logger(Protocol, Debug, "%s()", __func__);
 
 	while (s->p < s->end)
 	{
@@ -789,14 +816,17 @@ sec_process_mcs_data(STREAM s)
 		switch (tag)
 		{
 			case SEC_TAG_SRV_INFO:
+				logger(Protocol, Debug, "%s(), SEC_TAG_SRV_INFO", __func__);
 				sec_process_srv_info(s);
 				break;
 
 			case SEC_TAG_SRV_CRYPT:
+				logger(Protocol, Debug, "%s(), SEC_TAG_SRV_CRYPT", __func__);
 				sec_process_crypt_info(s);
 				break;
 
 			case SEC_TAG_SRV_CHANNELS:
+				logger(Protocol, Debug, "%s(), SEC_TAG_SRV_CHANNELS", __func__);
 				/* FIXME: We should parse this information and
 				   use it to map RDP5 channels to MCS 
 				   channels */
@@ -812,26 +842,27 @@ sec_process_mcs_data(STREAM s)
 
 /* Receive secure transport packet */
 STREAM
-sec_recv(uint8 * rdpver)
+sec_recv(RD_BOOL *is_fastpath)
 {
+	uint8 fastpath_hdr;
 	uint16 sec_flags;
 	uint16 channel;
 	STREAM s;
 
-	while ((s = mcs_recv(&channel, rdpver)) != NULL)
+	while ((s = mcs_recv(&channel, is_fastpath, &fastpath_hdr)) != NULL)
 	{
-		if (rdpver != NULL)
+		if (*is_fastpath == True)
 		{
-			if (*rdpver != 3)
+			/* If fastpath packet is encrypted, read data
+			   signature and decrypt */
+			if (fastpath_hdr & FASTPATH_OUTPUT_ENCRYPTED)
 			{
-				if (*rdpver & 0x80)
-				{
-					in_uint8s(s, 8);	/* signature */
-					sec_decrypt(s->p, s->end - s->p);
-				}
-				return s;
+				in_uint8s(s, 8);	/* signature */
+				sec_decrypt(s->p, s->end - s->p);
 			}
+			return s;
 		}
+
 		if (g_encryption || (!g_licence_issued && !g_licence_error_result))
 		{
 			/* TS_SECURITY_HEADER */
@@ -864,7 +895,7 @@ sec_recv(uint8 * rdpver)
 					{
 						/* for some reason the PDU and the length seem to be swapped.
 						   This isn't good, but we're going to do a byte for byte
-						   swap.  So the first foure value appear as: 00 04 XX YY,
+						   swap.  So the first four value appear as: 00 04 XX YY,
 						   where XX YY is the little endian length. We're going to
 						   use 04 00 as the PDU type, so after our swap this will look
 						   like: XX YY 04 00 */
@@ -896,9 +927,7 @@ sec_recv(uint8 * rdpver)
 		if (channel != MCS_GLOBAL_CHANNEL)
 		{
 			channel_process(s, channel);
-			if (rdpver != NULL)
-				*rdpver = 0xff;
-			return s;
+			continue;
 		}
 
 		return s;
@@ -923,7 +952,7 @@ sec_connect(char *server, char *username, char *domain, char *password, RD_BOOL 
 	mcs_data.p = mcs_data.data = (uint8 *) xmalloc(mcs_data.size);
 	sec_out_mcs_connect_initial_pdu(&mcs_data, selected_proto);
 
-	/* finialize the MCS connect sequence */
+	/* finalize the MCS connect sequence */
 	if (!mcs_connect_finalize(&mcs_data))
 		return False;
 
@@ -938,7 +967,9 @@ sec_connect(char *server, char *username, char *domain, char *password, RD_BOOL 
 void
 sec_disconnect(void)
 {
-	mcs_disconnect();
+	/* Perform a User-initiated disconnect sequence, see
+	   [MS-RDPBCGR] 1.3.1.4 Disconnect Sequences */
+	mcs_disconnect(RN_USER_REQUESTED);
 }
 
 /* reset the state of the sec layer */

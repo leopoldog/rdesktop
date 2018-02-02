@@ -83,7 +83,7 @@ char *g_rdpdr_clientname = NULL;
 
 /* Used to store incoming io request, until they are ready to be completed */
 /* using a linked list ensures that they are processed in the right order, */
-/* if multiple ios are being done on the same fd */
+/* if multiple IOs are being done on the same FD */
 struct async_iorequest
 {
 	uint32 fd, major, minor, offset, device, id, length, partial_len;
@@ -123,7 +123,7 @@ convert_to_unix_filename(char *filename)
 }
 
 static RD_BOOL
-rdpdr_handle_ok(int device, int handle)
+rdpdr_handle_ok(uint32 device, RD_NTHANDLE handle)
 {
 	switch (g_rdpdr_device[device].device_type)
 	{
@@ -234,10 +234,10 @@ rdpdr_send_client_name_request(void)
 }
 
 /* Returns the size of the payload of the announce packet */
-static int
+static size_t
 announcedata_size()
 {
-	int size, i;
+	size_t size, i;
 	PRINTER *printerinfo;
 	DISK_DEVICE *diskinfo;
 
@@ -280,7 +280,7 @@ rdpdr_send_client_device_list_announce(void)
 {
 	/* DR_CORE_CLIENT_ANNOUNCE_RSP */
 	uint32 bloblen, disklen, flags;
-	int i;
+	size_t i;
 	STREAM s;
 	PRINTER *printerinfo;
 	DISK_DEVICE *diskinfo;
@@ -929,7 +929,7 @@ rdpdr_init()
 void
 rdpdr_add_fds(int *n, fd_set * rfds, fd_set * wfds, struct timeval *tv, RD_BOOL * timeout)
 {
-	uint32 select_timeout = 0;	/* Timeout value to be used for select() (in millisecons). */
+	uint32 select_timeout = 0;	/* Timeout value to be used for select() (in milliseconds). */
 	struct async_iorequest *iorq;
 	char c;
 
@@ -947,7 +947,7 @@ rdpdr_add_fds(int *n, fd_set * rfds, fd_set * wfds, struct timeval *tv, RD_BOOL 
 					   support for reconnects. */
 
 					FD_SET(iorq->fd, rfds);
-					*n = MAX(*n, iorq->fd);
+					*n = MAX(*n, (int)iorq->fd);
 
 					/* Check if io request timeout is smaller than current (but not 0). */
 					if (iorq->timeout
@@ -982,7 +982,7 @@ rdpdr_add_fds(int *n, fd_set * rfds, fd_set * wfds, struct timeval *tv, RD_BOOL 
 						break;
 
 					FD_SET(iorq->fd, wfds);
-					*n = MAX(*n, iorq->fd);
+					*n = MAX(*n, (int)iorq->fd);
 					break;
 
 				case IRP_MJ_DEVICE_CONTROL:

@@ -28,7 +28,23 @@
 #include "utils.h"
 
 extern char g_codepage[16];
+
 static RD_BOOL g_iconv_works = True;
+
+uint32
+utils_djb2_hash(const char *str)
+{
+	uint8 c;
+	uint8 *pstr;
+	uint32 hash = 5381;
+
+	pstr = (uint8*)str;
+	while ((c = *pstr++))
+	{
+		hash = ((hash << 5) + hash) + c;
+	}
+	return hash;
+}
 
 char *
 utils_string_escape(const char *str)
@@ -77,7 +93,8 @@ utils_string_escape(const char *str)
 char *
 utils_string_unescape(const char *str)
 {
-	char *ns, *ps, *pd, c;
+	char *ns, *ps, *pd;
+	unsigned char c;
 
 	ns = xmalloc(strlen(str) + 1);
 	memcpy(ns, str, strlen(str) + 1);
@@ -90,7 +107,7 @@ utils_string_unescape(const char *str)
 		{
 			if (sscanf(ps, "%%%2hhX", &c) == 1)
 			{
-				pd[0] = c;
+				pd[0] = (char)c;
 				ps += 3;
 				pd++;
 				continue;
@@ -169,7 +186,7 @@ utils_mkdir_p(const char *path, int mask)
 	return 0;
 }
 
-/* Convert from system locale string to utf-8 */
+/* Convert from system locale string to UTF-8 */
 int
 utils_locale_to_utf8(const char *src, size_t is, char *dest, size_t os)
 {
@@ -205,7 +222,7 @@ utils_locale_to_utf8(const char *src, size_t is, char *dest, size_t os)
 		goto pass_trough_as_is;
 	}
 
-	/* Out couldn't hold the entire convertion */
+	/* Out couldn't hold the entire conversion */
 	if (is != 0)
 		return -1;
 
@@ -219,6 +236,47 @@ utils_locale_to_utf8(const char *src, size_t is, char *dest, size_t os)
 }
 
 
+void
+utils_calculate_dpi_scale_factors(uint32 width, uint32 height, uint32 dpi,
+				  uint32 *physwidth, uint32 *physheight,
+				  uint32 *desktopscale, uint32 *devicescale)
+{
+	*physwidth = *physheight = *desktopscale = *devicescale = 0;
+
+	if (dpi > 0)
+	{
+		*physwidth = width * 254 / (dpi * 10);
+		*physheight = height * 254 / (dpi * 10);
+
+		/* the spec calls this out as being valid for range
+		   100-500 but I doubt the upper range is accurate */
+		*desktopscale = dpi < 96 ? 100 : (dpi * 100 + 48) / 96;
+
+		/* the only allowed values for device scale factor are
+		   100, 140, and 180. */
+		*devicescale = dpi < 134 ? 100 : (dpi < 173 ? 140 : 180);
+
+	}
+}
+
+
+void
+utils_apply_session_size_limitations(uint32 *width, uint32 *height)
+{
+	/* width MUST be even number */
+	*width -= (*width) % 2;
+
+	if (*width > 8192)
+		*width = 8192;
+	else if (*width < 200)
+		*width = 200;
+
+	if (*height > 8192)
+		*height = 8192;
+	else if (*height < 200)
+		*height = 200;
+}
+
 /*
  * component logging
  *
@@ -227,7 +285,7 @@ utils_locale_to_utf8(const char *src, size_t is, char *dest, size_t os)
 
 static char *level[] = {
 	"debug",
-	"verbose",		/* Verbose mesasge for end user, no prefixed lines */
+	"verbose",		/* Verbose message for end user, no prefixed lines */
 	"warning",
 	"error",
 	"notice"		/* Normal messages for end user, no prefixed lines */
@@ -247,7 +305,7 @@ static char *subject[] = {
 
 static log_level_t _logger_level = Warning;
 
-#define DEFAULT_LOGGER_SUBJECTS (1 << Core);
+#define DEFAULT_LOGGER_SUBJECTS (1 << Core)
 
 #define ALL_LOGGER_SUBJECTS			\
 	  (1 << GUI)				\
@@ -285,6 +343,8 @@ logger(log_subject_t s, log_level_t lvl, char *format, ...)
 		fprintf(stdout, "%s\n", buf);
 	else
 		fprintf(stderr, "%s(%s): %s\n", subject[s], level[lvl], buf);
+
+	fflush(stdout);
 
 	va_end(ap);
 }

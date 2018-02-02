@@ -179,6 +179,7 @@ uint32
 rdpsnd_dsp_resample(unsigned char **out, unsigned char *in, unsigned int size,
 		    RD_WAVEFORMATEX * format, RD_BOOL stream_be)
 {
+	UNUSED(stream_be);
 #ifdef HAVE_LIBSAMPLERATE
 	SRC_DATA resample_data;
 	float *infloat, *outfloat;
@@ -227,12 +228,12 @@ rdpsnd_dsp_resample(unsigned char **out, unsigned char *in, unsigned int size,
 	}
 
 
-	/* Expand 8bit input-samples to 16bit */
-#ifndef HAVE_LIBSAMPLERATE	/* libsamplerate needs 16bit samples */
+	/* Expand 8-bit input-samples to 16-bit */
+#ifndef HAVE_LIBSAMPLERATE	/* libsamplerate needs 16-bit samples */
 	if (format->wBitsPerSample != resample_to_bitspersample)
 #endif
 	{
-		/* source: 8 bit, dest: 16bit */
+		/* source: 8 bit, dest: 16 bit */
 		if (format->wBitsPerSample == 8)
 		{
 			tmp = tmpdata;
@@ -258,7 +259,7 @@ rdpsnd_dsp_resample(unsigned char **out, unsigned char *in, unsigned int size,
 	if (src_converter == NULL)
 	{
 		logger(Sound, Warning,
-		       "rdpsndp_dsp_resample_set(), no samplerate converter available");
+		       "rdpsndp_dsp_resample_set(), no sample rate converter available");
 		return 0;
 	}
 
@@ -367,8 +368,8 @@ rdpsnd_dsp_resample(unsigned char **out, unsigned char *in, unsigned int size,
 	if (tmpdata != NULL)
 		xfree(tmpdata);
 
-	/* Shrink 16bit output-samples to 8bit */
-#ifndef HAVE_LIBSAMPLERATE	/* libsamplerate produces 16bit samples */
+	/* Shrink 16-bit output-samples to 8-bit */
+#ifndef HAVE_LIBSAMPLERATE	/* libsamplerate produces 16-bit samples */
 	if (format->wBitsPerSample != resample_to_bitspersample)
 #endif
 	{

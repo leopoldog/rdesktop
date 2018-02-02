@@ -6,7 +6,7 @@ AC_CANONICAL_HOST
 
 AC_PROG_CC
 if test "$GCC" = yes; then
-    CFLAGS="$CFLAGS -Wall"
+    CFLAGS="$CFLAGS -Wall -Wextra"
 fi
 
 AC_PROG_INSTALL
@@ -26,7 +26,7 @@ if test "$no_x" = "yes"; then
     echo
     exit 1
 fi
-    
+
 AC_PATH_TOOL(PKG_CONFIG, pkg-config)
 
 AC_SEARCH_LIBS(socket, socket)
@@ -53,7 +53,7 @@ m4_ifdef([PKG_CHECK_MODULES], [], [
 
 dnl Add option to build with using address sanitizer
 AC_ARG_ENABLE([address-sanitizer], AS_HELP_STRING([--enable-address-sanitizer], \
-              [enabled AddressSanitizer support for detecting a wide variety of \
+              [enable AddressSanitizer support for detecting a wide variety of \
                memory allocation and deallocation errors]), \
               [AC_DEFINE(HAVE_ADDRESS_SANITIZER, 1, [enable AddressSanitizer])
               CFLAGS="$CFLAGS -fsanitize=address"
@@ -106,9 +106,9 @@ AC_DEFINE_UNQUOTED(ssldir, "$ssldir")
 
 dnl Add OpenSSL includes and libraries
 CFLAGS="$CFLAGS -I$ssldir/include"
-AC_ARG_ENABLE(static-openssl, 
+AC_ARG_ENABLE(static-openssl,
              [  --enable-static-openssl link OpenSSL statically],
-             [static_openssl=yes], 
+             [static_openssl=yes],
              [static_openssl=no])
 if test x"$static_openssl" = "xyes"; then
     # OpenSSL generally relies on libz
@@ -251,11 +251,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	return 0;
-}], 
- [AC_MSG_RESULT(no)], 
- [AC_MSG_RESULT(yes) 
-  AC_DEFINE(NEED_ALIGN)], 
- [AC_MSG_RESULT(assuming yes) 
+}],
+ [AC_MSG_RESULT(no)],
+ [AC_MSG_RESULT(yes)
+  AC_DEFINE(NEED_ALIGN)],
+ [AC_MSG_RESULT(assuming yes)
   AC_DEFINE(NEED_ALIGN)])
 
 
@@ -276,22 +276,23 @@ AC_DEFINE_UNQUOTED(EGD_SOCKET, "$EGD_SOCKET")
 
 sound="yes"
 AC_ARG_WITH(sound,
-    [  --with-sound            select sound system ("oss", "sgi", "sun", "alsa" or "libao") ],
-    [ 
-    sound="$withval" 
+    [  --with-sound            select sound system ("oss", "sgi", "sun", "alsa", "pulse" or "libao") ],
+    [
+    sound="$withval"
     ])
 
 AC_CHECK_HEADER(sys/soundcard.h, [HAVE_OSS=1], [HAVE_OSS=0])
 AC_CHECK_HEADER(dmedia/audio.h, [HAVE_SGI=1], [HAVE_SGI=0])
 AC_CHECK_HEADER(sys/audioio.h, [HAVE_SUN=1], [HAVE_SUN=0])
 
-AC_ARG_ENABLE(static-libsamplerate, 
-    [  --enable-static-libsamplerate link libsamplerate statically], 
-    [static_libsamplerate=yes], 
+AC_ARG_ENABLE(static-libsamplerate,
+    [  --enable-static-libsamplerate link libsamplerate statically],
+    [static_libsamplerate=yes],
     [static_libsamplerate=no])
 
 if test -n "$PKG_CONFIG"; then
     PKG_CHECK_MODULES(LIBAO, ao, [HAVE_LIBAO=1], [HAVE_LIBAO=0])
+    PKG_CHECK_MODULES(PULSE, libpulse, [HAVE_PULSE=1], [HAVE_PULSE=0])
     PKG_CHECK_MODULES(ALSA, alsa, [HAVE_ALSA=1], [HAVE_ALSA=0])
     PKG_CHECK_MODULES(LIBSAMPLERATE, samplerate, [HAVE_LIBSAMPLERATE=1], [HAVE_LIBSAMPLERATE=0])
     if test x"$HAVE_LIBSAMPLERATE" = "x1"; then
@@ -334,6 +335,13 @@ case $sound in
             CFLAGS="$CFLAGS $ALSA_CFLAGS"
             LIBS="$LIBS $ALSA_LIBS"
             AC_DEFINE(RDPSND_ALSA)
+        fi
+
+        if test x"$HAVE_PULSE" = "x1"; then
+            SOUNDOBJ="$SOUNDOBJ rdpsnd_pulse.o"
+            CFLAGS="$CFLAGS $PULSE_CFLAGS"
+            LIBS="$LIBS $PULSE_LIBS"
+            AC_DEFINE(RDPSND_PULSE)
         fi
 
         if test x"$HAVE_LIBAO" = "x1"; then
@@ -384,6 +392,17 @@ case $sound in
         fi
         ;;
 
+    pulse)
+        if test x"$HAVE_PULSE" = "x1"; then
+            SOUNDOBJ="$SOUNDOBJ rdpsnd_pulse.o"
+            CFLAGS="$CFLAGS $PULSE_CFLAGS"
+            LIBS="$LIBS $PULSE_LIBS"
+            AC_DEFINE(RDPSND_PULSE)
+        else
+            AC_MSG_ERROR([Selected sound system is not available.])
+        fi
+        ;;
+
     libao)
         if test x"$HAVE_LIBAO" = "x1"; then
             SOUNDOBJ="$SOUNDOBJ rdpsnd_libao.o"
@@ -400,7 +419,7 @@ case $sound in
 
     *)
         AC_MSG_WARN([sound support disabled])
-        AC_MSG_WARN([Currently supported systems are Open Sound System (oss), SGI AL (sgi), Sun/BSD (sun), ALSA (alsa) and libao])
+        AC_MSG_WARN([Currently supported systems are Open Sound System (oss), SGI AL (sgi), Sun/BSD (sun), ALSA (alsa), PulseAudio (pulse) and libao])
         ;;
 esac
 
@@ -860,7 +879,7 @@ AC_CHECK_FUNCS(setmntent)
 #
 AC_ARG_WITH(ipv6,
     [  --with-ipv6             enable IPv6-support],
-    [ 
+    [
         if test $withval != "no";
         then
 	    AC_DEFINE(IPv6,1)

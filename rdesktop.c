@@ -49,7 +49,7 @@
 
 #include "ssl.h"
 
-/* Reconnect timeout based on approxiamted cookie life-time */
+/* Reconnect timeout based on approximated cookie life-time */
 #define RECONNECT_TIMEOUT (3600+600)
 #define RDESKTOP_LICENSE_STORE "/.local/share/rdesktop/licenses"
 
@@ -67,12 +67,17 @@ unsigned int g_keylayout = 0x409;	/* Defaults to US keyboard layout */
 int g_keyboard_type = 0x4;	/* Defaults to US keyboard layout */
 int g_keyboard_subtype = 0x0;	/* Defaults to US keyboard layout */
 int g_keyboard_functionkeys = 0xc;	/* Defaults to US keyboard layout */
-int g_sizeopt = 0;		/* If non-zero, a special size has been
-				   requested. If 1, the geometry will be fetched
-				   from _NET_WORKAREA. If negative, absolute value
-				   specifies the percent of the whole screen. */
-int g_width = 800;
-int g_height = 600;
+int g_dpi = 0;			/* device DPI: default not set */
+
+/* Following variables holds the requested width and height for a
+   rdesktop window, this is sent upon connect and tells the server
+   what size of session we want to have. Set to decent defaults. */
+uint32 g_requested_session_width = 1024;
+uint32 g_requested_session_height = 768;
+
+window_size_type_t g_window_size_type = Fixed;
+
+
 int g_xpos = 0;
 int g_ypos = 0;
 int g_pos = 0;			/* 0 position unspecified,
@@ -95,6 +100,7 @@ RD_BOOL g_desktop_save = True;	/* desktop save order */
 RD_BOOL g_polygon_ellipse_orders = True;	/* polygon / ellipse orders */
 RD_BOOL g_fullscreen = False;
 RD_BOOL g_grab_keyboard = True;
+RD_BOOL g_local_cursor = False;
 RD_BOOL g_hide_decorations = False;
 RDP_VERSION g_rdp_version = RDP_V5;	/* Default to version 5 */
 RD_BOOL g_rdpclip = True;
@@ -110,8 +116,7 @@ char g_seamless_spawn_cmd[512];
 RD_BOOL g_seamless_persistent_mode = True;
 RD_BOOL g_user_quit = False;
 uint32 g_embed_wnd;
-uint32 g_rdp5_performanceflags = (PERF_DISABLE_WALLPAPER |
-				  PERF_DISABLE_FULLWINDOWDRAG |
+uint32 g_rdp5_performanceflags = (PERF_DISABLE_FULLWINDOWDRAG |
 				  PERF_DISABLE_MENUANIMATIONS |
 				  PERF_ENABLE_FONT_SMOOTHING);
 /* Session Directory redirection */
@@ -136,6 +141,8 @@ RD_BOOL g_has_reconnect_random = False;
 RD_BOOL g_reconnect_loop = False;
 uint8 g_client_random[SEC_RANDOM_SIZE];
 RD_BOOL g_pending_resize = False;
+RD_BOOL g_pending_resize_defer = True;
+struct timeval g_pending_resize_defer_timer = {0};
 
 #ifdef WITH_RDPSND
 RD_BOOL g_rdpsnd = False;
@@ -169,7 +176,7 @@ usage(char *program)
 	fprintf(stderr, "   -p: password (- to prompt)\n");
 	fprintf(stderr, "   -n: client hostname\n");
 	fprintf(stderr, "   -k: keyboard layout on server (en-us, de, sv, etc.)\n");
-	fprintf(stderr, "   -g: desktop geometry (WxH)\n");
+	fprintf(stderr, "   -g: desktop geometry (WxH[@DPI][+X[+Y]])\n");
 #ifdef WITH_SCARD
 	fprintf(stderr, "   -i: enables smartcard authentication, password is used as pin\n");
 #endif
@@ -181,13 +188,14 @@ usage(char *program)
 	fprintf(stderr, "   -e: disable encryption (French TS)\n");
 	fprintf(stderr, "   -E: disable encryption from client to server\n");
 	fprintf(stderr, "   -m: do not send motion events\n");
+	fprintf(stderr, "   -M: use local mouse cursor\n");
 	fprintf(stderr, "   -C: use private colour map\n");
 	fprintf(stderr, "   -D: hide window manager decorations\n");
 	fprintf(stderr, "   -K: keep window manager key bindings\n");
 	fprintf(stderr, "   -S: caption button size (single application mode)\n");
 	fprintf(stderr, "   -T: window title\n");
 	fprintf(stderr, "   -t: disable use of remote ctrl\n");
-	fprintf(stderr, "   -N: enable numlock syncronization\n");
+	fprintf(stderr, "   -N: enable numlock synchronization\n");
 	fprintf(stderr, "   -X: embed into another window with a given id.\n");
 	fprintf(stderr, "   -a: connection colour depth\n");
 	fprintf(stderr, "   -z: enable rdp compression\n");
@@ -226,14 +234,14 @@ usage(char *program)
 	fprintf(stderr, "         '-r scard[:\"Scard Name\"=\"Alias Name[;Vendor Name]\"[,...]]\n");
 	fprintf(stderr, "          example: -r scard:\"eToken PRO 00 00\"=\"AKS ifdh 0\"\n");
 	fprintf(stderr,
-		"                   \"eToken PRO 00 00\" -> Device in Linux/Unix enviroment\n");
+		"                   \"eToken PRO 00 00\" -> Device in GNU/Linux and UNIX environment\n");
 	fprintf(stderr,
-		"                   \"AKS ifdh 0\"       -> Device shown in Windows enviroment \n");
+		"                   \"AKS ifdh 0\"       -> Device shown in Windows environment \n");
 	fprintf(stderr, "          example: -r scard:\"eToken PRO 00 00\"=\"AKS ifdh 0;AKS\"\n");
 	fprintf(stderr,
-		"                   \"eToken PRO 00 00\" -> Device in Linux/Unix enviroment\n");
+		"                   \"eToken PRO 00 00\" -> Device in GNU/Linux and UNIX environment\n");
 	fprintf(stderr,
-		"                   \"AKS ifdh 0\"       -> Device shown in Windows enviroment \n");
+		"                   \"AKS ifdh 0\"       -> Device shown in Microsoft Windows environment \n");
 	fprintf(stderr,
 		"                   \"AKS\"              -> Device vendor name                 \n");
 #endif
@@ -247,7 +255,7 @@ usage(char *program)
 	fprintf(stderr,
 		"                              is used to authenticate the user by smartcard\n");
 	fprintf(stderr,
-		"           sc-container-name  Specifies the container name, this is usally the username\n");
+		"           sc-container-name  Specifies the container name, this is usually the username\n");
 	fprintf(stderr, "           sc-reader-name     Smartcard reader name to use\n");
 	fprintf(stderr,
 		"           sc-card-name       Specifies the card name of the smartcard to use\n");
@@ -400,7 +408,7 @@ handle_disconnect_reason(RD_BOOL deactivated, uint16 reason)
 			break;
 
 		case ERRINFO_CB_REDIRECTING_TO_DESTINATION:
-			text = "Error occured while being redirected by broker";
+			text = "Error occurred while being redirected by broker";
 			retval = EXRD_CB_REDIR_DEST;
 			break;
 
@@ -481,6 +489,8 @@ handle_disconnect_reason(RD_BOOL deactivated, uint16 reason)
 static void
 rdesktop_reset_state(void)
 {
+	g_pending_resize_defer = True;
+
 	rdp_reset_state();
 #ifdef WITH_SCARD
 	scard_reset_state();
@@ -511,7 +521,7 @@ read_password(char *password, int size)
 
 	if (tcgetattr(STDIN_FILENO, &tios) == 0)
 	{
-		fprintf(stderr, prompt);
+		fputs(prompt, stderr);
 		tios.c_lflag &= ~ECHO;
 		tcsetattr(STDIN_FILENO, TCSANOW, &tios);
 		istty = 1;
@@ -566,7 +576,7 @@ parse_server_and_port(char *server)
 	}
 	else
 	{
-		/* dns name or IPv4 style address format - server.example.com:port or 1.2.3.4:port */
+		/* DNS name or IPv4 style address format - server.example.com:port or 1.2.3.4:port */
 		p = strchr(server, ':');
 		if (p != NULL)
 		{
@@ -584,6 +594,170 @@ parse_server_and_port(char *server)
 #endif /* IPv6 */
 
 }
+
+// [WxH|P%|W%xH%][@DPI][+X[+Y]]|workarea
+int parse_geometry_string(const char *optarg)
+{
+	sint32 value;
+	const char *ps;
+	char *pe;
+
+	/* special keywords */
+	if (strcmp(optarg, "workarea") == 0)
+	{
+		g_window_size_type = Workarea;
+		return 0;
+	}
+
+	/* parse first integer */
+	ps = optarg;
+	value = strtol(ps, &pe, 10);
+	if (ps == pe || value <= 0)
+	{
+		logger(Core, Error, "invalid geometry, expected positive integer for width");
+		return -1;
+	}
+
+	g_requested_session_width = value;
+	ps = pe;
+
+	/* expect % or x */
+	if (*ps != '%' && *ps != 'x')
+	{
+		logger(Core, Error, "invalid geometry, expected '%%' or 'x' after width");
+		return -1;
+	}
+
+	if (*ps == '%')
+	{
+		g_window_size_type = PercentageOfScreen;
+		ps++;
+		pe++;
+	}
+
+	if (*ps == 'x')
+	{
+		ps++;
+		value = strtol(ps, &pe, 10);
+		if (ps == pe || value <= 0)
+		{
+			logger(Core, Error, "invalid geometry, expected positive integer for height");
+			return -1;
+		}
+
+		g_requested_session_height = value;
+		ps = pe;
+
+		if (*ps == '%' && g_window_size_type == Fixed)
+		{
+			logger(Core, Error, "invalid geometry, unexpected '%%' after height");
+			return -1;
+		}
+
+		if (g_window_size_type == PercentageOfScreen)
+		{
+			if (*ps != '%')
+			{
+				logger(Core, Error, "invalid geometry, expected '%%' after height");
+				return -1;
+			}
+			ps++;
+			pe++;
+		}
+	}
+	else
+        {
+		if (g_window_size_type == PercentageOfScreen)
+		{
+			/* percentage of screen used for both width and height */
+			g_requested_session_height = g_requested_session_width;
+		}
+		else
+		{
+			logger(Core, Error, "invalid geometry, missing height (WxH)");
+			return -1;
+		}
+	}
+
+	/* parse optional dpi */
+	if (*ps == '@')
+	{
+		ps++;
+		pe++;
+		value = strtol(ps, &pe, 10);
+		if (ps == pe || value <= 0)
+		{
+			logger(Core, Error, "invalid geometry, expected positive integer for DPI");
+			return -1;
+		}
+
+		g_dpi = value;
+		ps = pe;
+	}
+
+	/* parse optional window position */
+	if (*ps == '+' || *ps == '-')
+	{
+		/* parse x position */
+		value = strtol(ps, &pe, 10);
+		if (ps == pe)
+		{
+			logger(Core, Error, "invalid geometry, expected an integer for X position");
+			return -1;
+		}
+
+		g_pos |= (value < 0) ? 2 : 1;
+		g_xpos = value;
+		ps = pe;
+	}
+
+	if (*ps == '+' || *ps == '-')
+	{
+		/* parse y position */
+		value = strtol(ps, &pe, 10);
+		if (ps == pe)
+		{
+			logger(Core, Error, "invalid geometry, expected an integer for Y position");
+			return -1;
+		}
+		g_pos |= (value < 0) ? 4 : 1;
+		g_ypos = value;
+		ps = pe;
+	}
+
+	if (*pe != '\0')
+	{
+		logger(Core, Error, "invalid geometry, unexpected characters at end of string");
+		return -1;
+	}
+	return 0;
+}
+
+static void
+setup_user_requested_session_size()
+{
+	switch(g_window_size_type)
+	{
+	case Fullscreen:
+		ui_get_screen_size(&g_requested_session_width, &g_requested_session_height);
+		break;
+
+	case Workarea:
+		ui_get_workarea_size(&g_requested_session_width, &g_requested_session_height);
+		break;
+
+	case Fixed:
+		break;
+
+	case PercentageOfScreen:
+		ui_get_screen_size_from_percentage(g_requested_session_width,
+						   g_requested_session_height,
+						   &g_requested_session_width,
+						   &g_requested_session_height);
+		break;
+	}
+}
+
 
 /* Client program */
 int
@@ -637,7 +811,7 @@ main(int argc, char *argv[])
 	g_num_devices = 0;
 
 	while ((c = getopt(argc, argv,
-			   "A:u:L:d:s:c:p:n:k:g:o:fbBeEitmzCDKS:T:NX:a:x:Pr:045vh?")) != -1)
+			   "A:u:L:d:s:c:p:n:k:g:o:fbBeEitmMzCDKS:T:NX:a:x:Pr:045vh?")) != -1)
 	{
 		switch (c)
 		{
@@ -670,12 +844,12 @@ main(int argc, char *argv[])
 				break;
 
 			case 'p':
-				if ((optarg[0] != '-') && (optarg[1] != 0))
+				if (!((optarg[0] == '-') && (optarg[1] == 0)))
 				{
 					STRNCPY(g_password, optarg, sizeof(g_password));
 					flags |= RDP_INFO_AUTOLOGON;
 
-					/* try to overwrite argument so it won't appear in ps */
+					/* try to overwrite argument so it won't appear in `ps` */
 					p = optarg;
 					while (*p)
 						*(p++) = 'X';
@@ -702,60 +876,14 @@ main(int argc, char *argv[])
 			case 'g':
 				geometry_option = True;
 				g_fullscreen = False;
-				if (!strcmp(optarg, "workarea"))
+				if (parse_geometry_string(optarg) != 0)
 				{
-					g_sizeopt = 1;
-					break;
-				}
-
-				g_width = strtol(optarg, &p, 10);
-				if (g_width <= 0)
-				{
-					logger(Core, Error, "invalid geometry width specified");
 					return EX_USAGE;
 				}
-
-				if (*p == 'x')
-					g_height = strtol(p + 1, &p, 10);
-
-				if (g_height <= 0)
-				{
-					logger(Core, Error, "invalid geometry heigth specified");
-					return EX_USAGE;
-				}
-
-				if (*p == '%')
-				{
-					g_sizeopt = -g_width;
-					g_width = g_sizeopt;
-
-					if (*(p + 1) == 'x')
-					{
-						g_height = -strtol(p + 2, &p, 10);
-					}
-					else
-					{
-						g_height = g_sizeopt;
-					}
-
-					p++;
-				}
-
-				if (*p == '+' || *p == '-')
-				{
-					g_pos |= (*p == '-') ? 2 : 1;
-					g_xpos = strtol(p, &p, 10);
-
-				}
-				if (*p == '+' || *p == '-')
-				{
-					g_pos |= (*p == '-') ? 4 : 1;
-					g_ypos = strtol(p, NULL, 10);
-				}
-
 				break;
 
 			case 'f':
+				g_window_size_type = Fullscreen;
 				g_fullscreen = True;
 				break;
 
@@ -775,6 +903,9 @@ main(int argc, char *argv[])
 				break;
 			case 'm':
 				g_sendmotion = False;
+				break;
+			case 'M':
+				g_local_cursor = True;
 				break;
 
 			case 'C':
@@ -850,7 +981,7 @@ main(int argc, char *argv[])
 					g_rdp5_performanceflags = (PERF_DISABLE_WALLPAPER |
 								   PERF_ENABLE_FONT_SMOOTHING);
 				}
-				else if (str_startswith(optarg, "l"))	/* lan */
+				else if (str_startswith(optarg, "l"))	/* LAN */
 				{
 					g_rdp5_performanceflags = PERF_ENABLE_FONT_SMOOTHING;
 				}
@@ -1029,6 +1160,12 @@ main(int argc, char *argv[])
 		usage(argv[0]);
 		return EX_USAGE;
 	}
+	if (g_local_cursor)
+	{
+		/* there is no point wasting bandwidth on cursor shadows
+                 * that we're just going to throw out anyway */
+		g_rdp5_performanceflags |= PERF_DISABLE_CURSOR_SHADOW;
+	}
 
 	STRNCPY(server, argv[optind], sizeof(server));
 	parse_server_and_port(server);
@@ -1071,7 +1208,8 @@ main(int argc, char *argv[])
 			logger(Core, Error, "You cannot use -4 and -A at the same time");
 			return EX_USAGE;
 		}
-		g_sizeopt = -100;
+
+		g_window_size_type = Fullscreen;
 		g_grab_keyboard = False;
 	}
 
@@ -1186,6 +1324,12 @@ main(int argc, char *argv[])
 		lspci_init();
 
 	rdpdr_init();
+
+	dvc_init();
+	rdpedisp_init();
+
+	setup_user_requested_session_size();
+
 	g_reconnect_loop = False;
 	while (1)
 	{
@@ -1209,7 +1353,8 @@ main(int argc, char *argv[])
 			g_network_error = False;
 		}
 
-		ui_init_connection();
+		utils_apply_session_size_limitations(&g_requested_session_width, &g_requested_session_height);
+
 		if (!rdp_connect
 		    (server, flags, domain, g_password, shell, directory, g_reconnect_loop))
 		{
@@ -1277,6 +1422,8 @@ main(int argc, char *argv[])
 		/* Enter a reconnect loop if we have a pending resize request */
 		if (g_pending_resize)
 		{
+			logger(Core, Verbose, "Resize reconnect loop triggered, new size %dx%d",
+			       g_requested_session_width, g_requested_session_height);
 			g_pending_resize = False;
 			g_reconnect_loop = True;
 			continue;
@@ -1477,7 +1624,7 @@ hexdump(unsigned char *p, unsigned int len)
   	 Needle may be escaped by a backslash, in
 	 that case we ignore that particular needle.
   return value: returns next src pointer, for
-  	succesive executions, like in a while loop
+  	successive executions, like in a while loop
 	if retval is 0, then there are no more args.
   pitfalls:
   	src is modified. 0x00 chars are inserted to
@@ -1808,8 +1955,8 @@ rd_create_ui()
 {
 	if (!ui_have_window())
 	{
-		/* create a window if we dont have one intialized */
-		if (!ui_create_window())
+		/* create a window if we don't have one initialized */
+		if (!ui_create_window(g_requested_session_width, g_requested_session_height))
 			exit(EX_OSERR);
 	}
 	else

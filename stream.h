@@ -47,6 +47,9 @@ void out_utf16s(STREAM s, const char *string);
 void out_utf16s_padded(STREAM s, const char *string, size_t width, unsigned char pad);
 void out_utf16s_no_eos(STREAM s, const char *string);
 
+size_t in_ansi_string(STREAM s, char *string, size_t len);
+
+
 #define s_push_layer(s,h,n)	{ (s)->h = (s)->p; (s)->p += n; }
 #define s_pop_layer(s,h)	(s)->p = (s)->h;
 #define s_mark_end(s)		(s)->end = (s)->p;
@@ -61,7 +64,6 @@ void out_utf16s_no_eos(STREAM s, const char *string);
 #define in_uint32_le(s,v)	{ v = *(uint32 *)((s)->p); (s)->p += 4; }
 #define out_uint16_le(s,v)	{ *(uint16 *)((s)->p) = v; (s)->p += 2; }
 #define out_uint32_le(s,v)	{ *(uint32 *)((s)->p) = v; (s)->p += 4; }
-
 #else
 #define in_uint16_le(s,v)	{ v = *((s)->p++); v += *((s)->p++) << 8; }
 #define in_uint32_le(s,v)	{ in_uint16_le(s,v) \
@@ -69,6 +71,8 @@ void out_utf16s_no_eos(STREAM s, const char *string);
 #define out_uint16_le(s,v)	{ *((s)->p++) = (v) & 0xff; *((s)->p++) = ((v) >> 8) & 0xff; }
 #define out_uint32_le(s,v)	{ out_uint16_le(s, (v) & 0xffff); out_uint16_le(s, ((v) >> 16) & 0xffff); }
 #endif
+
+#define out_uint64_le(s,v)	{ out_uint32_le(s, (v) & 0xffffffff); out_uint32_le(s, ((v) >> 32) & 0xffffffff); }
 
 #if defined(B_ENDIAN) && !defined(NEED_ALIGN)
 #define in_uint16_be(s,v)	{ v = *(uint16 *)((s)->p); (s)->p += 2; }
@@ -100,6 +104,7 @@ void out_utf16s_no_eos(STREAM s, const char *string);
 #define in_uint8p(s,v,n)	{ v = (s)->p; (s)->p += n; }
 #define in_uint8a(s,v,n)	{ memcpy(v,(s)->p,n); (s)->p += n; }
 #define in_uint8s(s,n)		(s)->p += n;
+#define in_skip(s,n)		in_uint8s(s,n)
 #define out_uint8(s,v)		*((s)->p++) = v;
 #define out_uint8p(s,v,n)	{ memcpy((s)->p,v,n); (s)->p += n; }
 #define out_uint8a(s,v,n)	out_uint8p(s,v,n);

@@ -3,6 +3,7 @@
    Protocol services - Multipoint Communications Service
    Copyright (C) Matthew Chapman <matthewc.unsw.edu.au> 1999-2008
    Copyright 2005-2011 Peter Astrand <astrand@cendio.se> for Cendio AB
+   Copyright 2018 Henrik Andersson <hean01@cendio.com> for Cendio AB
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -59,7 +60,7 @@ mcs_send_connect_initial(STREAM mcs_data)
 	int datalen = mcs_data->end - mcs_data->data;
 	int length = 9 + 3 * 34 + 4 + datalen;
 	STREAM s;
-
+	logger(Protocol, Debug, "%s()", __func__);
 	s = iso_init(length + 5);
 
 	ber_out_header(s, MCS_CONNECT_INITIAL, length);
@@ -86,11 +87,16 @@ mcs_send_connect_initial(STREAM mcs_data)
 static RD_BOOL
 mcs_recv_connect_response(STREAM mcs_data)
 {
+	UNUSED(mcs_data);
 	uint8 result;
 	int length;
 	STREAM s;
+	RD_BOOL is_fastpath;
+	uint8 fastpath_hdr;
 
-	s = iso_recv(NULL);
+	logger(Protocol, Debug, "%s()", __func__);
+	s = iso_recv(&is_fastpath, &fastpath_hdr);
+
 	if (s == NULL)
 		return False;
 
@@ -130,7 +136,7 @@ static void
 mcs_send_edrq(void)
 {
 	STREAM s;
-
+	logger(Protocol, Debug, "%s()", __func__);
 	s = iso_init(5);
 
 	out_uint8(s, (MCS_EDRQ << 2));
@@ -146,7 +152,7 @@ static void
 mcs_send_aurq(void)
 {
 	STREAM s;
-
+	logger(Protocol, Debug, "%s()", __func__);
 	s = iso_init(1);
 
 	out_uint8(s, (MCS_AURQ << 2));
@@ -159,10 +165,14 @@ mcs_send_aurq(void)
 static RD_BOOL
 mcs_recv_aucf(uint16 * mcs_userid)
 {
+	RD_BOOL is_fastpath;
+	uint8 fastpath_hdr;
 	uint8 opcode, result;
 	STREAM s;
 
-	s = iso_recv(NULL);
+	logger(Protocol, Debug, "%s()", __func__);
+	s = iso_recv(&is_fastpath, &fastpath_hdr);
+
 	if (s == NULL)
 		return False;
 
@@ -208,10 +218,14 @@ mcs_send_cjrq(uint16 chanid)
 static RD_BOOL
 mcs_recv_cjcf(void)
 {
+	RD_BOOL is_fastpath;
+	uint8 fastpath_hdr;
 	uint8 opcode, result;
 	STREAM s;
 
-	s = iso_recv(NULL);
+	logger(Protocol, Debug, "%s()", __func__);
+	s = iso_recv(&is_fastpath, &fastpath_hdr);
+
 	if (s == NULL)
 		return False;
 
@@ -234,6 +248,32 @@ mcs_recv_cjcf(void)
 		in_uint8s(s, 2);	/* join_chanid */
 
 	return s_check_end(s);
+}
+
+
+/* Send MCS Disconnect provider ultimatum PDU */
+void
+mcs_send_dpu(unsigned short reason)
+{
+	STREAM s, contents;
+
+	logger(Protocol, Debug, "mcs_send_dpu(), reason=%d", reason);
+
+	contents = malloc(sizeof(struct stream));
+	memset(contents, 0, sizeof(struct stream));
+	s_realloc(contents, 6);
+	s_reset(contents);
+	ber_out_integer(contents, reason);	/* Reason */
+	ber_out_sequence(contents, NULL);	/* SEQUENCE OF NonStandradParameters OPTIONAL */
+	s_mark_end(contents);
+
+	s = iso_init(8);
+	ber_out_sequence(s, contents);
+	s_free(contents);
+
+	s_mark_end(s);
+
+	iso_send(s);
 }
 
 /* Initialise an MCS transport data packet */
@@ -276,17 +316,18 @@ mcs_send(STREAM s)
 
 /* Receive an MCS transport data packet */
 STREAM
-mcs_recv(uint16 * channel, uint8 * rdpver)
+mcs_recv(uint16 * channel, RD_BOOL *is_fastpath, uint8 *fastpath_hdr)
 {
 	uint8 opcode, appid, length;
 	STREAM s;
 
-	s = iso_recv(rdpver);
+	s = iso_recv(is_fastpath, fastpath_hdr);
 	if (s == NULL)
 		return NULL;
-	if (rdpver != NULL)
-		if (*rdpver != 3)
-			return s;
+
+	if (*is_fastpath == True)
+		return s;
+
 	in_uint8(s, opcode);
 	appid = opcode >> 2;
 	if (appid != MCS_SDIN)
@@ -310,6 +351,7 @@ RD_BOOL
 mcs_connect_start(char *server, char *username, char *domain, char *password,
 		  RD_BOOL reconnect, uint32 * selected_protocol)
 {
+	logger(Protocol, Debug, "%s()", __func__);
 	return iso_connect(server, username, domain, password, reconnect, selected_protocol);
 }
 
@@ -318,6 +360,7 @@ mcs_connect_finalize(STREAM mcs_data)
 {
 	unsigned int i;
 
+	logger(Protocol, Debug, "%s()", __func__);
 	mcs_send_connect_initial(mcs_data);
 	if (!mcs_recv_connect_response(mcs_data))
 		goto error;
@@ -352,8 +395,9 @@ mcs_connect_finalize(STREAM mcs_data)
 
 /* Disconnect from the MCS layer */
 void
-mcs_disconnect(void)
+mcs_disconnect(int reason)
 {
+	mcs_send_dpu(reason);
 	iso_disconnect();
 }
 
