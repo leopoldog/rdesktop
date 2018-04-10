@@ -3051,7 +3051,6 @@ timeval_is_set(struct timeval *time)
 static RD_BOOL
 process_pending_resize ()
 {
-	uint32 width, height;
 	time_t now_ts;
 	struct timeval now;
 
@@ -3065,9 +3064,22 @@ process_pending_resize ()
 	/* There is a race problem when using disconnect / reconnect
 	   sequence were one sometimes would be presented with
 	   unexpected login window. Waiting a little bit extra after
-	   getting the reconnect cookie solves this problem. */
+	   getting the reconnect cookie solves this problem.
+
+	   In addition to that delay, we also want to wait for
+	   RDPEDISP to become available. In scenarios where we can use
+	   both online and reconnect-based resizes, we prefer
+	   online. Our brief investigation shows that RDPEDISP support
+	   is established about 100-300 ms after the login info packet
+	   was received. Thus, we want to wait a bit so we can avoid
+	   resizes using reconnect. Once RDPEDISP is established, the
+	   defer timer is cleared, so there will be no delay before
+	   the first resize for servers that support RDPEDISP. Other
+	   servers will get the initial resize delayed with 2 seconds.
+	*/
+
 	if (timeval_is_set(&g_pending_resize_defer_timer) &&
-	    time_difference_in_ms(g_pending_resize_defer_timer, now) >= 100)
+	    time_difference_in_ms(g_pending_resize_defer_timer, now) >= 2000)
 	{
 		g_pending_resize_defer_timer.tv_sec = g_pending_resize_defer_timer.tv_usec = 0;
 		g_pending_resize_defer = False;
@@ -3080,8 +3092,8 @@ process_pending_resize ()
 	if (g_fullscreen || g_seamless_rdp)
 	{
 		/* follow root window size */
-		width = WidthOfScreen(g_screen);
-		height = HeightOfScreen(g_screen);
+		g_requested_session_width = WidthOfScreen(g_screen);
+		g_requested_session_height = HeightOfScreen(g_screen);
 		if (g_window_size_type == PercentageOfScreen)
 		{
 			/* TODO: Implement percentage of screen */
@@ -3090,8 +3102,8 @@ process_pending_resize ()
 	else
 	{
 		/* Follow window size */
-		width = g_window_width;
-		height = g_window_height;
+		g_requested_session_width = g_window_width;
+		g_requested_session_height = g_window_height;
 	}
 
 
@@ -3102,9 +3114,6 @@ process_pending_resize ()
 		 * sequence when RDPEDISP is not supported by
 		 * server by returning to outer loop.
 		 */
-
-		g_requested_session_width = width;
-		g_requested_session_height = height;
 
 		logger(GUI, Verbose, "Window resize detected, reconnecting to new size %dx%d",
 		       g_requested_session_width,
@@ -3119,9 +3128,11 @@ process_pending_resize ()
 			return False;
 
 		logger(GUI, Verbose, "Window resize detected, requesting matching session size %dx%d",
-		       width, height);
+		       g_requested_session_width,
+		       g_requested_session_height);
 
-		rdpedisp_set_session_size(width, height);
+		rdpedisp_set_session_size(g_requested_session_width,
+		                          g_requested_session_height);
 
 		g_pending_resize = False;
 		g_wait_for_deactivate_ts = now_ts;
