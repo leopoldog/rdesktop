@@ -56,7 +56,7 @@ AC_ARG_ENABLE([address-sanitizer], AS_HELP_STRING([--enable-address-sanitizer], 
               [enable AddressSanitizer support for detecting a wide variety of \
                memory allocation and deallocation errors]), \
               [AC_DEFINE(HAVE_ADDRESS_SANITIZER, 1, [enable AddressSanitizer])
-              CFLAGS="$CFLAGS -fsanitize=address"
+              CFLAGS="$CFLAGS -fsanitize=address -fno-omit-frame-pointer"
               AC_TRY_COMPILE([],[const int i=0;],[AC_MSG_NOTICE([Address Sanitizer Enabled])],
                                                  [AC_MSG_ERROR([Address Sanitizer not available])])
               ])
@@ -217,6 +217,10 @@ AS_IF([test "x$enable_smartcard" != "xno"], [
 	   echo
 	   exit 1
 	fi
+
+	AC_MSG_CHECKING([for PCSC-lite >= 1.6.0 (PnP/Notifications support)])
+	PKG_CHECK_MODULES(PNP_NOTIFICATIONS, libpcsclite >= 1.6.0, [WITH_PNP_NOTIFICATIONS=1], [WITH_PNP_NOTIFICATIONS=0])
+	AC_DEFINE(WITH_PNP_NOTIFICATIONS)
 
 	AC_MSG_CHECKING([for old version of PCSC])
 	AC_TRY_LINK([

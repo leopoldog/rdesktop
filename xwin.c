@@ -4,7 +4,7 @@
    Copyright (C) Matthew Chapman <matthewc.unsw.edu.au> 1999-2008
    Copyright 2007-2008 Pierre Ossman <ossman@cendio.se> for Cendio AB
    Copyright 2002-2011 Peter Astrand <astrand@cendio.se> for Cendio AB
-   Copyright 2012-2017 Henrik Andersson <hean01@cendio.se> for Cendio AB
+   Copyright 2012-2018 Henrik Andersson <hean01@cendio.se> for Cendio AB
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -2010,7 +2010,7 @@ ui_deinit(void)
 		XCloseIM(g_IM);
 
 	if (g_null_cursor != NULL)
-		ui_destroy_cursor(g_null_cursor);
+		XFreeCursor(g_display, (Cursor)g_null_cursor);
 
 	XFreeModifiermap(g_mod_map);
 
@@ -3022,18 +3022,6 @@ process_fds(int rdp_socket, int ms)
 }
 
 static RD_BOOL
-process_ui()
-{
-	if (!xwin_process_events())
-	{
-		/* User quit */
-		g_pending_resize = False;
-		return True;
-	}
-	return False;
-}
-
-static RD_BOOL
 timeval_is_set(struct timeval *time)
 {
 	return (time->tv_sec == 0 && time->tv_usec == 0) ? False : True;
@@ -3141,23 +3129,30 @@ process_pending_resize ()
 	return False;
 }
 
-/* Breaks out of loop if g_exit_mainloop is set or if there is data available on rdp socket for
-   processing. */
+/* This function is the heart of the mainloop pump in
+   rdekstop. Handles processing of pending X11 events and data on all
+   file descriptors used by rdesktop except for rdp_socket.
+   Processing of data on rdp_socket is done by returning from this
+   function to the calling tcp_recv().
+
+   This function will return if there is data available for reading on
+   rdp_socket or if g_exit_mainloop flag is set.
+*/
 void
 ui_select(int rdp_socket)
 {
+	int timeout;
 	RD_BOOL rdp_socket_has_data = False;
 
 	while (g_exit_mainloop == False && rdp_socket_has_data == False)
 	{
-
-		/* Process any events already waiting */
-
-		/* returns True on user quit */
-		if (process_ui() == True)
+		/* Process a limited amount of pending x11 events */
+		if (!xwin_process_events())
 		{
-			g_exit_mainloop = True;
+			/* User quit */
 			g_user_quit = True;
+			g_exit_mainloop = True;
+			g_pending_resize = False;
 			continue;
 		}
 
@@ -3174,14 +3169,29 @@ ui_select(int rdp_socket)
 		if (g_seamless_active)
 			sw_check_timers();
 
-		/* We end up here when we are waiting for a resize timer to expire before attempting
-		   to resize the session. We don't want to sleep in the select for up to 60 seconds
-		   if there are no RDP packets if the resize timer is 0.5 seconds. */
-		if (g_pending_resize == True)
-			rdp_socket_has_data = process_fds(rdp_socket, 100);
-		else
-			rdp_socket_has_data = process_fds(rdp_socket, 60000);
+		/* process_fds() is a little special, it does two
+		   things in one. It will perform a select() on all
+		   filedescriptors; rdpsnd / rdpdr / ctrl and
+		   rdp_socket passed as argument. If data is available
+		   on any filedescriptor except rdp_socket, it will be processed.
 
+		   If data is available on rdp_socket, the call return
+		   true and we exit from ui_select() to let tcp_recv()
+		   read data from rdp_socket.
+
+		   Use 60 seconds as default timeout for select. If
+		   there is more X11 events on queue or g_pend is set,
+		   use a low timeout.
+		*/
+
+		timeout = 60000;
+
+		if (XPending(g_display) > 0)
+			timeout = 0;
+		else if (g_pending_resize == True)
+			timeout = 100;
+
+		rdp_socket_has_data = process_fds(rdp_socket, timeout);
 	}
 }
 
@@ -3314,6 +3324,7 @@ get_pixel(uint32 idx, uint8 * andmask, uint8 * xormask, int bpp, uint8 * xor_fla
 	uint32 argb;
 	uint8 alpha;
 	uint8 *pxor;
+	PixelColour pc;
 
 	*xor_flag = 0;
 
@@ -3336,6 +3347,14 @@ get_pixel(uint32 idx, uint8 * andmask, uint8 * xormask, int bpp, uint8 * xor_fla
 			}
 			else
 				argb = (alpha << 24) | (argb ? 0xffffff : 0x000000);
+			break;
+
+	        case 16:
+			offs = idx * 2;
+			pxor = xormask + offs;
+			SPLITCOLOUR16(*((uint16*)pxor), pc);
+			alpha = GET_BIT(andmask, idx) ? 0x00 : 0xff;
+			argb = (alpha << 24) | (pc.red << 16) | (pc.green << 8) | pc.blue;
 			break;
 
 		case 24:
@@ -3408,7 +3427,7 @@ ui_create_cursor(unsigned int xhot, unsigned int yhot, uint32 width,
 	logger(GUI, Debug, "ui_create_cursor(): xhot=%d, yhot=%d, width=%d, height=%d, bpp=%d",
 	       xhot, yhot, width, height, bpp);
 
-	if (bpp != 1 && bpp != 24 && bpp != 32)
+	if (bpp != 1 && bpp != 16 && bpp != 24 && bpp != 32)
 	{
 		logger(GUI, Warning, "ui_create_xcursor_cursor(): Unhandled cursor bit depth %d",
 		       bpp);
@@ -3491,6 +3510,10 @@ ui_set_cursor(RD_HCURSOR cursor)
 void
 ui_destroy_cursor(RD_HCURSOR cursor)
 {
+	// Do not destroy fallback null cursor
+	if (cursor == g_null_cursor)
+		return;
+
 	XFreeCursor(g_display, (Cursor) cursor);
 }
 
